@@ -1,0 +1,4 @@
+# These packages are required for the inference metrics calculation, but must be installed separately
+# as they have dependency conflicts with other packages
+simcse @ git+https://github.com/shatu/SimCSE.git@4857649611f14 # this forked version allows using current versions of scipy/numpy
+simctg==0.7
