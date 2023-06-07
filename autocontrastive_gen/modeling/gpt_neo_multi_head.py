@@ -35,8 +35,9 @@ class MultiHeadGPTNeo(GPTNeoForCausalLM):
         # initialize the linear exit heads
         self.lm_head_name_prefix = 'lm_head_'
         self.name_to_lm_exit_head = nn.ModuleDict(
-            {self.lm_head_name_prefix+str(idx): nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-             for idx in config.lm_head_layer_indices})
+            {self.lm_head_name_prefix + str(layer): self.lm_head if isinstance(layer, str) and layer == 'original'
+                else nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+             for layer in config.lm_head_layer_indices})
 
         # set inference-time generation parameters
         self.use_original_head = use_original_head
@@ -92,13 +93,16 @@ class MultiHeadGPTNeo(GPTNeoForCausalLM):
         # index 2 is the 2nd, etc.
         index_to_layer_lm_head_logits = {}
         for head_name, layer_lm_head in self.name_to_lm_exit_head.items():
-            layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
-            is_top_layer = layer_index == self.config.num_hidden_layers
-            layer_outputs = transformer_outputs.hidden_states[layer_index]
-            if not is_top_layer:  # layer norm for top layer is already applied within the GPT2 code
-                layer_outputs = self.transformer.ln_f(layer_outputs)
-            layer_lm_logits = layer_lm_head.to(self.transformer.device)(layer_outputs)
-            index_to_layer_lm_head_logits[layer_index] = layer_lm_logits
+            if head_name == 'lm_head_original':
+                index_to_layer_lm_head_logits['original'] = layer_lm_head(hidden_states)
+            else:
+                layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
+                is_top_layer = layer_index == self.config.num_hidden_layers
+                layer_outputs = transformer_outputs.hidden_states[layer_index]
+                if not is_top_layer:  # layer norm for top layer is already applied within the GPT2 code
+                    layer_outputs = self.transformer.ln_f(layer_outputs)
+                layer_lm_logits = layer_lm_head.to(self.transformer.device)(layer_outputs)
+                index_to_layer_lm_head_logits[layer_index] = layer_lm_logits
 
         # loss calculation for all the lm heads
         loss = None

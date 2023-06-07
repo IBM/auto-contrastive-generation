@@ -35,8 +35,9 @@ class MultiHeadT5(T5ForConditionalGeneration):
         # initialize the linear exit heads
         self.lm_head_name_prefix = 'lm_head_'
         self.name_to_lm_exit_head = nn.ModuleDict(
-            {self.lm_head_name_prefix+str(idx): nn.Linear(config.d_model, config.vocab_size, bias=False)
-             for idx in config.lm_head_layer_indices})
+            {self.lm_head_name_prefix + str(layer): self.lm_head if isinstance(layer, str) and layer == 'original'
+                else nn.Linear(config.d_model, config.vocab_size, bias=False)
+             for layer in config.lm_head_layer_indices})
 
         # set inference-time generation parameters
         self.use_original_head = use_original_head
@@ -154,11 +155,14 @@ class MultiHeadT5(T5ForConditionalGeneration):
         # index 2 is the 2nd, etc.
         index_to_layer_lm_head_logits = {}
         for head_name, layer_lm_head in self.name_to_lm_exit_head.items():
-            layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
-            is_top_layer = layer_index == self.config.num_decoder_layers
-            layer_decoder_outputs = normalize_and_rescale(decoder_outputs.hidden_states[layer_index], is_top_layer)
-            layer_lm_logits = layer_lm_head.to(self.decoder.device)(layer_decoder_outputs)
-            index_to_layer_lm_head_logits[layer_index] = layer_lm_logits
+            if head_name == 'lm_head_original':
+                index_to_layer_lm_head_logits['original'] = layer_lm_head(normalize_and_rescale(sequence_output, True))
+            else:
+                layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
+                is_top_layer = layer_index == self.config.num_decoder_layers
+                layer_decoder_outputs = normalize_and_rescale(decoder_outputs.hidden_states[layer_index], is_top_layer)
+                layer_lm_logits = layer_lm_head.to(self.decoder.device)(layer_decoder_outputs)
+                index_to_layer_lm_head_logits[layer_index] = layer_lm_logits
 
         # loss calculation for all the lm heads
         loss = None

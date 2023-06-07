@@ -35,12 +35,13 @@ class AutoMultiExitModel:
             raise Exception(f'Model {model_name_or_path} of type {type(model_config)} is not supported')
 
         model_config.output_hidden_states = True
-        # If loading a standard single-exit model checkpoint, add the desired exit layers to the model config
-        # (this parameter should be set once, at training time; at inference it is loaded from the model config file)
-        if not hasattr(model_config, 'lm_head_layer_indices'):
+        if multi_exit_config.lm_head_layer_indices is not None:
+            # If loading a standard single-exit model checkpoint (or, alternatively, if you wish to fine-tune a
+            # specific subset of heads in an existing multi-exit checkpoint), here we set the desired exit layers.
+            # This parameter should be set only at training time; at inference it is loaded from the model config file
             model_config.lm_head_layer_indices = multi_exit_config.lm_head_layer_indices
 
-        elif multi_exit_config.use_original_head is False:
+        if multi_exit_config.use_original_head is False:
             # validate multi-exit config is compatible with the model checkpoint
             multi_exit_config_layers = multi_exit_config.contrast_layer_indices \
                 if multi_exit_config.contrast_layer_indices is not None else [multi_exit_config.output_layer_index]
