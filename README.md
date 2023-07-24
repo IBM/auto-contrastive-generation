@@ -90,7 +90,7 @@ The new heads were trained on the English portion of the [CC-100](https://huggin
 
 ## Reference
 Ariel Gera, Roni Friedman, Ofir Arviv, Chulaka Gunasekara, Benjamin Sznajder, Noam Slonim and Eyal Shnarch (2023). 
-[The Benefits of Bad Advice: Autocontrastive Decoding across Model Layers](https://arxiv.org/abs/2305.01628). ACL 2023.
+[The Benefits of Bad Advice: Autocontrastive Decoding across Model Layers](https://aclanthology.org/2023.acl-long.580). ACL 2023.
 
 Please cite: 
 ```
@@ -100,7 +100,10 @@ Please cite:
   booktitle={Proceedings of the 61st Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers)},
   month={july},
   address={Toronto, Canada},
-  year={2023}
+  year={2023},
+  publisher={Association for Computational Linguistics},
+  url={https://aclanthology.org/2023.acl-long.580},
+  pages={10406--10420}
 }
 ```
 
