@@ -15,43 +15,20 @@
 from typing import Optional, Tuple, Union
 
 import torch
-from torch import nn
 from torch.nn.modules.loss import CrossEntropyLoss
 from transformers import T5ForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput, Seq2SeqLMOutput
 
+from autocontrastive_gen.modeling.multi_exit_modeling import MultiExitMixin
 
-class MultiHeadT5(T5ForConditionalGeneration):
-    def __init__(self, config, use_original_head=False, output_layer_index=24, contrast_layer_indices=None,
-                 contrast_function=None, freeze_parameters=True):
+
+class MultiExitT5(T5ForConditionalGeneration, MultiExitMixin):
+    def __init__(self, config, **multi_exit_kwargs):
         super().__init__(config)
-        if not hasattr(config, 'lm_head_layer_indices'):
-            raise Exception(f"LM exit head indices must be specified when initializing {self.__class__.__name__}")
-
-        if freeze_parameters:
-            for param in self.parameters():
-                param.requires_grad = False  # freeze all standard parameters and heads
-
-        # initialize the linear exit heads
-        self.lm_head_name_prefix = 'lm_head_'
-        self.name_to_lm_exit_head = nn.ModuleDict(
-            {self.lm_head_name_prefix + str(layer): self.lm_head if isinstance(layer, str) and layer == 'original'
-                else nn.Linear(config.d_model, config.vocab_size, bias=False)
-             for layer in config.lm_head_layer_indices})
-
-        # set inference-time generation parameters
-        self.use_original_head = use_original_head
-        self.output_layer_index = output_layer_index
-        self.contrast_layer_indices = contrast_layer_indices
-        self.contrast_function = contrast_function
-        desc = 'original head' if self.use_original_head else (
-            f'output layer {self.output_layer_index}' if not self.contrast_layer_indices else f'contrast between layers {self.contrast_layer_indices}')
-        print(f'********* Using {desc} for generation ***********')
-
-        if freeze_parameters:
-            for name, param in self.named_parameters():
-                if param.requires_grad:
-                    print(name)
+        self.initialize_multi_exit_model(config,
+                                         output_size=config.d_model,
+                                         num_layers=config.num_decoder_layers,
+                                         **multi_exit_kwargs)
 
     def forward(
             self,
@@ -142,48 +119,27 @@ class MultiHeadT5(T5ForConditionalGeneration):
             self.lm_head = self.lm_head.to(self.encoder.first_device)
             sequence_output = sequence_output.to(self.lm_head.weight.device)
 
-        def normalize_and_rescale(hidden_layer, is_top_layer):
-            if not is_top_layer:  # layer norm and dropout for top layer are already applied within the T5 decoder
-                normalized_hidden_layer = self.decoder.final_layer_norm(hidden_layer)
-                hidden_layer = self.decoder.dropout(normalized_hidden_layer)
-            if self.config.tie_word_embeddings:
-                # Rescale output before projecting on vocab
-                hidden_layer = hidden_layer * (self.model_dim ** -0.5)
-            return hidden_layer
+        original_exit_output = self.normalize_layer_output(sequence_output, True)
+        if self.apply_lm_head:
+            original_exit_output = self.lm_head.to(self.decoder.device)(original_exit_output)
 
-        # index 0 of decoder_outputs.hidden_states are the decoder input embeddings, index 1 is the 1st layer,
-        # index 2 is the 2nd, etc.
-        index_to_layer_lm_head_logits = {}
-        for head_name, layer_lm_head in self.name_to_lm_exit_head.items():
-            if head_name == 'lm_head_original':
-                index_to_layer_lm_head_logits['original'] = layer_lm_head(normalize_and_rescale(sequence_output, True))
-            else:
-                layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
-                is_top_layer = layer_index == self.config.num_decoder_layers
-                layer_decoder_outputs = normalize_and_rescale(decoder_outputs.hidden_states[layer_index], is_top_layer)
-                layer_lm_logits = layer_lm_head.to(self.decoder.device)(layer_decoder_outputs)
-                index_to_layer_lm_head_logits[layer_index] = layer_lm_logits
+        index_to_layer_lm_logits = \
+            self.calculate_all_layer_outputs(original_exit_output=original_exit_output,
+                                             all_hidden_states=decoder_outputs.hidden_states,
+                                             device=self.decoder.device)
 
+        # TODO loss for conv_matrices
         # loss calculation for all the lm heads
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss(ignore_index=-100)
             loss = 0
-            for idx, lm_logits in index_to_layer_lm_head_logits.items():
+            for lm_logits in index_to_layer_lm_logits.values():
                 layer_loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), labels.view(-1))
                 loss += layer_loss
 
-        # according to the initialization, we decide which head(s) are used for generating outputs at inference time
-        if self.use_original_head:
-            output_logits = self.lm_head(normalize_and_rescale(sequence_output, True))
-        elif not self.contrast_layer_indices:
-            output_logits = index_to_layer_lm_head_logits[self.output_layer_index]
-        else:
-            lm_logits_upper = self.lm_head(normalize_and_rescale(sequence_output, True)) if self.contrast_layer_indices[0] == 'original' \
-                else index_to_layer_lm_head_logits[self.contrast_layer_indices[0]]
-            lm_logits_lower = index_to_layer_lm_head_logits[self.contrast_layer_indices[1]]
-
-            output_logits = self.contrast_function(lm_logits_upper, lm_logits_lower)
+        output_logits = self.calculate_model_output(original_exit_output=original_exit_output,
+                                                    index_to_layer_lm_logits=index_to_layer_lm_logits)
 
         if not return_dict:
             output = (output_logits,) + decoder_outputs[1:] + encoder_outputs
@@ -200,3 +156,13 @@ class MultiHeadT5(T5ForConditionalGeneration):
             encoder_hidden_states=encoder_outputs.hidden_states,
             encoder_attentions=encoder_outputs.attentions,
         )
+
+    def normalize_layer_output(self, layer_output, is_last_layer):
+        if not is_last_layer:  # layer norm and dropout for top layer are already applied within the T5 decoder
+            layer_output = self.decoder.final_layer_norm(layer_output)
+            layer_output = self.decoder.dropout(layer_output)
+        if self.config.tie_word_embeddings:
+            # Rescale output before projecting on vocab
+            layer_output = layer_output * (self.model_dim ** -0.5)
+        return layer_output
+

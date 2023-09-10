@@ -15,24 +15,34 @@
 import ast
 import dataclasses
 from dataclasses import dataclass
-from typing import Tuple, Callable, Union
+from enum import Enum
+from functools import partial
+from typing import Callable, Union
 
 from autocontrastive_gen.contrast_calculation import calculate_contrasted_logits
 
 
+class VocabularyProjectionMode(Enum):
+    LAYER_SPECIFIC_PROJECTION = 0
+    SHARED_PROJECTION_CAST_OUTPUTS = 1
+    SHARED_PROJECTION_DIRECT = 2
+
+
 @dataclass
 class MultiExitConfiguration:
+    vocab_projection_mode: VocabularyProjectionMode = VocabularyProjectionMode.LAYER_SPECIFIC_PROJECTION
     # training
-    lm_head_layer_indices: Tuple[int, ...] = None
+    lm_head_layer_indices: tuple[int, ...] = None
     freeze_parameters: bool = False
     # inference
     use_original_head: bool = True
     output_layer_index: int = None
-    contrast_layer_indices: Tuple[Union[int, str], int] = None
-    contrast_function: Callable = lambda upper, lower: calculate_contrasted_logits(upper, lower, minimum_candidates=1,
-                                                                                   alpha=0.1)
+    contrast_layer_indices: tuple[Union[int, str], int] = None
+    contrast_function: Callable = partial(calculate_contrasted_logits, minimum_candidates=1, alpha=0.1)
     
     def __post_init__(self):
+        if type(self.vocab_projection_mode) == str:
+            self.vocab_projection_mode = VocabularyProjectionMode[self.vocab_projection_mode.upper()]
         if type(self.contrast_layer_indices) == str:
             self.contrast_layer_indices = tuple(int(idx) if idx != 'original' else 'original'
                                                 for idx in self.contrast_layer_indices.split(';'))

@@ -24,7 +24,7 @@ from tqdm.auto import tqdm
 
 from autocontrastive_gen.data_processing.dataset_catalog import DatasetsCatalog
 from autocontrastive_gen.evaluation.auto_metrics import calc_metrics
-from autocontrastive_gen.modeling.configuration import MultiExitConfiguration
+from autocontrastive_gen.modeling.configuration import MultiExitConfiguration, VocabularyProjectionMode
 from autocontrastive_gen.utils import get_model, get_tokenizer, device
 
 
@@ -52,6 +52,7 @@ def run(args):
     is_seq2seq_task, texts, targets = prepare_texts(args.dataset, args.number_of_samples, args.dataset_split)
 
     lm_config = MultiExitConfiguration(
+        vocab_projection_mode=VocabularyProjectionMode.LAYER_SPECIFIC_PROJECTION,
         use_original_head=args.use_original_head,
         output_layer_index=args.output_layer_index,
         contrast_layer_indices=args.contrast_layer_indices,

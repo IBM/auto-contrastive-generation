@@ -15,43 +15,20 @@
 from typing import Optional, Tuple, Union
 
 import torch
-from torch import nn
 from torch.nn.modules.loss import CrossEntropyLoss
 from transformers import GPTNeoForCausalLM
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions, CausalLMOutputWithPast
 
+from autocontrastive_gen.modeling.multi_exit_modeling import MultiExitMixin
 
-class MultiHeadGPTNeo(GPTNeoForCausalLM):
-    def __init__(self, config, use_original_head=False, output_layer_index=24, contrast_layer_indices=None,
-                 contrast_function=None, freeze_parameters=True):
+
+class MultiExitGPTNeo(GPTNeoForCausalLM, MultiExitMixin):
+    def __init__(self, config, **multi_exit_kwargs):
         super().__init__(config)
-        if not hasattr(config, 'lm_head_layer_indices'):
-            raise Exception(f"LM exit head indices must be specified when initializing {self.__class__.__name__}")
-
-        if freeze_parameters:
-            for param in self.parameters():
-                param.requires_grad = False  # freeze all standard parameters and heads
-
-        # initialize the linear exit heads
-        self.lm_head_name_prefix = 'lm_head_'
-        self.name_to_lm_exit_head = nn.ModuleDict(
-            {self.lm_head_name_prefix + str(layer): self.lm_head if isinstance(layer, str) and layer == 'original'
-                else nn.Linear(config.hidden_size, config.vocab_size, bias=False)
-             for layer in config.lm_head_layer_indices})
-
-        # set inference-time generation parameters
-        self.use_original_head = use_original_head
-        self.output_layer_index = output_layer_index
-        self.contrast_layer_indices = contrast_layer_indices
-        self.contrast_function = contrast_function
-        desc = 'original head' if self.use_original_head else (
-            f'output layer {self.output_layer_index}' if not self.contrast_layer_indices else f'contrast between layers {self.contrast_layer_indices}')
-        print(f'********* Using {desc} for generation ***********')
-
-        if freeze_parameters:
-            for name, param in self.named_parameters():
-                if param.requires_grad:
-                    print(name)
+        self.initialize_multi_exit_model(config,
+                                         output_size=config.hidden_size,
+                                         num_layers=config.num_hidden_layers,
+                                         **multi_exit_kwargs)
 
     def forward(
             self,
@@ -89,27 +66,21 @@ class MultiHeadGPTNeo(GPTNeoForCausalLM):
         )
         hidden_states = transformer_outputs[0]
 
-        # index 0 of transformer_outputs.hidden_states are the decoder input embeddings, index 1 is the 1st layer,
-        # index 2 is the 2nd, etc.
-        index_to_layer_lm_head_logits = {}
-        for head_name, layer_lm_head in self.name_to_lm_exit_head.items():
-            if head_name == 'lm_head_original':
-                index_to_layer_lm_head_logits['original'] = layer_lm_head(hidden_states)
-            else:
-                layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
-                is_top_layer = layer_index == self.config.num_hidden_layers
-                layer_outputs = transformer_outputs.hidden_states[layer_index]
-                if not is_top_layer:  # layer norm for top layer is already applied within the GPT2 code
-                    layer_outputs = self.transformer.ln_f(layer_outputs)
-                layer_lm_logits = layer_lm_head.to(self.transformer.device)(layer_outputs)
-                index_to_layer_lm_head_logits[layer_index] = layer_lm_logits
+        original_exit_output = self.lm_head.to(self.transformer.device)(hidden_states) if self.apply_lm_head \
+            else hidden_states            
 
+        index_to_layer_lm_logits = \
+            self.calculate_all_layer_outputs(original_exit_output=original_exit_output,
+                                             all_hidden_states=transformer_outputs.hidden_states,
+                                             device=self.transformer.device)
+
+        # TODO loss for conv_matrices
         # loss calculation for all the lm heads
         loss = None
         if labels is not None:
             loss_fct = CrossEntropyLoss()
             loss = 0
-            for idx, lm_logits in index_to_layer_lm_head_logits.items():
+            for lm_logits in index_to_layer_lm_logits.values():
 
                 # Compute loss in fp32 to match with mesh-tf version
                 # https://github.com/EleutherAI/gpt-neo/blob/89ce74164da2fb16179106f54e2269b5da8db333/models/gpt2/gpt2.py#L179
@@ -124,19 +95,8 @@ class MultiHeadGPTNeo(GPTNeoForCausalLM):
 
             loss = loss.to(hidden_states.dtype)
 
-        # according to the initialization, we decide which head(s) are used for generating outputs at inference time
-        if self.use_original_head:
-            output_logits = self.lm_head(hidden_states)
-        elif not self.contrast_layer_indices:
-            output_logits = index_to_layer_lm_head_logits[self.output_layer_index]
-        else:
-            lm_logits_upper = self.lm_head(hidden_states) if self.contrast_layer_indices[0] == 'original' \
-                else index_to_layer_lm_head_logits[self.contrast_layer_indices[0]]
-            lm_logits_lower = index_to_layer_lm_head_logits[self.contrast_layer_indices[1]]
-
-            contrasted = self.contrast_function(lm_logits_upper, lm_logits_lower)
-
-            output_logits = contrasted
+        output_logits = self.calculate_model_output(original_exit_output=original_exit_output,
+                                                    index_to_layer_lm_logits=index_to_layer_lm_logits)
 
         if not return_dict:
             output = (output_logits,) + transformer_outputs[1:]
@@ -149,3 +109,9 @@ class MultiHeadGPTNeo(GPTNeoForCausalLM):
             hidden_states=transformer_outputs.hidden_states,
             attentions=transformer_outputs.attentions,
         )
+
+    def normalize_layer_output(self, layer_output, is_last_layer: bool):
+        if not is_last_layer:  # layer norm for top layer is already applied within the GPT Neo code
+            layer_output = self.transformer.ln_f(layer_output)
+        return layer_output
+

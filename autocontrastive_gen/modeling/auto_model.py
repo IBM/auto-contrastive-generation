@@ -15,9 +15,9 @@
 from transformers import AutoConfig, GPTNeoConfig, GPT2Config, T5Config
 
 from autocontrastive_gen.modeling.configuration import MultiExitConfiguration
-from autocontrastive_gen.modeling.gpt2_multi_head import MultiHeadGPT2
-from autocontrastive_gen.modeling.gpt_neo_multi_head import MultiHeadGPTNeo
-from autocontrastive_gen.modeling.t5_multi_head import MultiHeadT5
+from autocontrastive_gen.modeling.gpt2_multi_head import MultiExitGPT2
+from autocontrastive_gen.modeling.gpt_neo_multi_head import MultiExitGPTNeo
+from autocontrastive_gen.modeling.t5_multi_head import MultiExitT5
 
 
 class AutoMultiExitModel:
@@ -26,11 +26,11 @@ class AutoMultiExitModel:
         # Determine the appropriate multi-head model class according to the standard model config it is based on
         model_config = AutoConfig.from_pretrained(model_name_or_path)
         if type(model_config) == GPTNeoConfig:
-            model_class = MultiHeadGPTNeo
+            model_class = MultiExitGPTNeo
         elif type(model_config) == GPT2Config:
-            model_class = MultiHeadGPT2
+            model_class = MultiExitGPT2
         elif type(model_config) == T5Config:
-            model_class = MultiHeadT5
+            model_class = MultiExitT5
         else:
             raise Exception(f'Model {model_name_or_path} of type {type(model_config)} is not supported')
 

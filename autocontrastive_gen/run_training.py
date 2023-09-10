@@ -17,7 +17,7 @@ from argparse import ArgumentParser
 
 from autocontrastive_gen.data_processing.dataset_catalog import DatasetsCatalog
 from autocontrastive_gen.head_training.head_training_utils import get_head_training_function
-from autocontrastive_gen.modeling.configuration import MultiExitConfiguration
+from autocontrastive_gen.modeling.configuration import MultiExitConfiguration, VocabularyProjectionMode
 from autocontrastive_gen.utils import get_model, get_tokenizer
 
 
@@ -41,6 +41,7 @@ if __name__ == '__main__':
     # for training, we can mostly use the default generation params of *MultiExitConfiguration* as we only care
     # about the loss, and not about which specific exit layer or decoding approach is used for generation outputs
     lm_config = MultiExitConfiguration(
+        vocab_projection_mode=VocabularyProjectionMode.LAYER_SPECIFIC_PROJECTION,
         freeze_parameters=not dataset.is_seq2seq_task(),
         lm_head_layer_indices=args.lm_head_layer_indices,
     )
