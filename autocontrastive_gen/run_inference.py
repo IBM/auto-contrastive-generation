@@ -15,7 +15,6 @@
 import ast
 import json
 import os
-import random
 
 from argparse import ArgumentParser
 
@@ -25,31 +24,11 @@ from tqdm.auto import tqdm
 from autocontrastive_gen.data_processing.dataset_catalog import DatasetsCatalog
 from autocontrastive_gen.evaluation.auto_metrics import calc_metrics
 from autocontrastive_gen.modeling.configuration import MultiExitConfiguration, VocabularyProjectionMode
-from autocontrastive_gen.utils import get_model, get_tokenizer, device
-
-
-def prepare_texts(dataset, num_samples, dataset_split):
-    dataset = getattr(DatasetsCatalog, dataset)
-    dataset_dict = dataset.load()
-
-    texts = dataset_dict[dataset_split]['source_text']
-
-    is_seq2seq_task = dataset.is_seq2seq_task()
-    if is_seq2seq_task:
-        targets = dataset_dict[dataset_split]['target_text']
-    else:
-        targets = ['dummy_target'] * len(texts)
-
-    if num_samples is not None and num_samples < len(texts):
-        sample_ids = random.Random(0).sample(list(range(len(texts))), k=num_samples)
-        texts = [texts[i] for i in sample_ids]
-        targets = [targets[i] for i in sample_ids]
-
-    return is_seq2seq_task, texts, targets
+from autocontrastive_gen.utils import get_model, get_tokenizer, device, get_texts_for_inference
 
 
 def run(args):
-    is_seq2seq_task, texts, targets = prepare_texts(args.dataset, args.number_of_samples, args.dataset_split)
+    is_seq2seq_task, texts, targets = get_texts_for_inference(args.dataset, args.number_of_samples, args.dataset_split)
 
     lm_config = MultiExitConfiguration(
         vocab_projection_mode=VocabularyProjectionMode.LAYER_SPECIFIC_PROJECTION,
