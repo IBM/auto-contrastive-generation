@@ -59,31 +59,41 @@ def linreg(x, y, intercept=False, file_name=None):
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--model_name_or_path', type=str, required=True)
-    parser.add_argument('--dataset', type=str, required=True, choices=DatasetsCatalog.all_datasets())
+    parser.add_argument('-m', '--model_name_or_path', type=str, required=True)
+    parser.add_argument('-e', '--exit_indices_to_train', nargs='+', type=int, default=None)
+    parser.add_argument('--dataset', type=str, default='wikitext_103', choices=DatasetsCatalog.all_datasets())
     parser.add_argument('--num_examples', type=int, default=5000)
-    parser.add_argument('--num_tokens_to_generate', type=int, default=5)
+    parser.add_argument('--num_vectors_per_example', type=int, default=5)
     parser.add_argument('--max_seq_length', type=int, default=512)
     args = parser.parse_args()
 
     _, texts, _ = get_texts_for_inference(args.dataset, args.num_examples, 'train')
 
     tokenizer = get_tokenizer(args.model_name_or_path, max_seq_length=args.max_seq_length)
-    
-    last_layer = AutoConfig.from_pretrained(args.model_name_or_path).num_decoder_layers
-    
-    layers_to_infer = range(last_layer, 0, -2)
-    
+    model_config = AutoConfig.from_pretrained(args.model_name_or_path)
+
+    last_layer = model_config.num_decoder_layers if model_config.is_encoder_decoder else model_config.num_hidden_layers
+    if args.exit_indices_to_train is not None:
+        exit_indices_to_train = args.exit_indices_to_train
+    else:
+        # train matrices for all the layers
+        exit_indices_to_train = range(1, last_layer)
+
+    layers_to_infer = [last_layer, *exit_indices_to_train]
+
+    if hasattr(model_config, 'lm_head_layer_indices'):
+        model_exit_indices = {*layers_to_infer, *model_config.lm_head_layer_indices}
+    else:
+        model_exit_indices = layers_to_infer
+
     lm_config = MultiExitConfiguration(
         vocab_projection_mode=VocabularyProjectionMode.SHARED_PROJECTION_CAST_OUTPUTS,
-        lm_head_layer_indices=tuple(sorted(layers_to_infer)),
+        lm_head_layer_indices=tuple(sorted(model_exit_indices)),
         use_original_head=False,
         output_layer_index=last_layer,
     )
 
     model = get_model(args.model_name_or_path, lm_config)
-    if not model.config.is_encoder_decoder:
-        raise Exception("This script currently only supports encoder-decoder models")
 
     # instead of outputting logits, we want the layer outputs *before* the LM head
     setattr(model, 'apply_lm_head', False)
@@ -92,44 +102,54 @@ if __name__ == '__main__':
     top_layer_sequences = {}
     for i, layer in enumerate(layers_to_infer):
         setattr(model, 'output_layer_index', layer)
-        
+
         layer_output_vectors = []
         print(f'generating texts from {len(texts)} prompts')
         for idx, text in tqdm(enumerate(texts), total=len(texts)):
             prompt = tokenizer(text, return_tensors='pt', truncation=True).input_ids.to(device)
             num_tokens_to_keep = random.Random(idx).randint(1, prompt.shape[1])
             prompt = prompt[:, :num_tokens_to_keep]
-            
+
             if layer == last_layer:
-                 # generate a few tokens from the last layer to be used as a kind of "teacher forcing"
                 setattr(model, 'apply_lm_head', True)
+                # generate a few tokens, for a kind of "teacher forcing" of final layer decoder generation behavior
                 generated = model.generate(prompt,
-                                           max_new_tokens=args.num_tokens_to_generate,
+                                           max_new_tokens=args.num_vectors_per_example,
                                            num_beams=1, do_sample=False, top_p=1.0, top_k=0.0,
                                            return_dict_in_generate=True,
                                            output_hidden_states=True)
                 top_layer_sequences[idx] = generated.sequences[:, :-1]
-                layer_output_vectors.extend([model.normalize_layer_output(x[-1], True).detach().cpu().squeeze()
-                                             for x in generated.decoder_hidden_states])
-            else:                
+
+                # extract the output vectors
+                generated_hidden_states = generated.decoder_hidden_states if model_config.is_encoder_decoder \
+                    else generated.hidden_states
+                for hidden_states in generated_hidden_states:
+                    v = hidden_states[-1][:, -1, :]  # output of the final decoder layer given the preceding sequence
+                    layer_output_vectors.append(model.normalize_layer_output(v, True).detach().cpu().squeeze())
+
+            else:
                 setattr(model, 'apply_lm_head', False)
-                model_kwargs = model._prepare_encoder_decoder_kwargs_for_generation(prompt, {}, 'input_ids')
-                
-                outputs = model(decoder_input_ids=top_layer_sequences[idx], **model_kwargs)  
-                layer_output_vectors.extend(outputs.logits.detach().cpu())
-                
+                if model_config.is_encoder_decoder:
+                    model_kwargs = model._prepare_encoder_decoder_kwargs_for_generation(prompt, {}, 'input_ids')
+                    outputs = model(decoder_input_ids=top_layer_sequences[idx], **model_kwargs)
+                    layer_output_vectors.extend(list(outputs.logits.detach().cpu().squeeze()))
+                else:
+                    for j in range(args.num_vectors_per_example):
+                        model_output = model(top_layer_sequences[idx][:, :prompt.shape[1]+j])
+                        layer_output_vectors.append(model_output.logits[:, -1, :].detach().cpu().squeeze())
+
         layer_to_vectors[layer] = torch.vstack(layer_output_vectors)
-        
+
         if layer == last_layer:
             continue
-        
+
         print(f'learning conversion matrix from {layer} to {last_layer}, based on {layer_to_vectors[layer].shape[0]} vectors')
         mat = linreg(layer_to_vectors[layer], layer_to_vectors[last_layer], intercept=False,
                      file_name=f'{layer}_{last_layer}.pickle')
-    
+
         # save model with the conversion matrices
-        model.name_to_conv_matrix[f'{layer}_to_{last_layer}'].weight.data[:] = mat 
-        
-        out_path = args.model_name_or_path.replace('/', '_') + '_' + '-'.join(str(l) for l in layers_to_infer[:i+1])
+        model.name_to_conv_matrix[f'{layer}_to_{last_layer}'].weight.data[:] = mat
+
+        out_path = args.model_name_or_path.replace('/', '_') + '_multi_exit' + '-'.join(str(l) for l in layers_to_infer[:i+1])
         model.save_pretrained(out_path)
         tokenizer.save_pretrained(out_path)
