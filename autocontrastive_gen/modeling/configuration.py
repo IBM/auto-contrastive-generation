@@ -31,8 +31,8 @@ class VocabularyProjectionMode(Enum):
 @dataclass
 class MultiExitConfiguration:
     vocab_projection_mode: VocabularyProjectionMode = VocabularyProjectionMode.LAYER_SPECIFIC_PROJECTION
-    # training
     lm_head_layer_indices: tuple[int, ...] = None
+    # training
     freeze_parameters: bool = False
     # inference
     use_original_head: bool = True

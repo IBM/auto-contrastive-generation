@@ -19,20 +19,20 @@ from autocontrastive_gen.modeling.gpt2_multi_head import MultiExitGPT2
 from autocontrastive_gen.modeling.gpt_neo_multi_head import MultiExitGPTNeo
 from autocontrastive_gen.modeling.t5_multi_head import MultiExitT5
 
+CONFIG_TO_MODEL_CLASS_MAPPING = {GPTNeoConfig: MultiExitGPTNeo,
+                                 GPT2Config: MultiExitGPT2,
+                                 T5Config: MultiExitT5}
+
 
 class AutoMultiExitModel:
     @staticmethod
     def from_pretrained(model_name_or_path, multi_exit_config: MultiExitConfiguration, **extra_kwargs):
         # Determine the appropriate multi-head model class according to the standard model config it is based on
         model_config = AutoConfig.from_pretrained(model_name_or_path)
-        if type(model_config) == GPTNeoConfig:
-            model_class = MultiExitGPTNeo
-        elif type(model_config) == GPT2Config:
-            model_class = MultiExitGPT2
-        elif type(model_config) == T5Config:
-            model_class = MultiExitT5
-        else:
+        if type(model_config) not in CONFIG_TO_MODEL_CLASS_MAPPING:
             raise Exception(f'Model {model_name_or_path} of type {type(model_config)} is not supported')
+
+        model_class = CONFIG_TO_MODEL_CLASS_MAPPING[type(model_config)]
 
         model_config.output_hidden_states = True
         if multi_exit_config.lm_head_layer_indices is not None:
@@ -47,7 +47,7 @@ class AutoMultiExitModel:
                 if multi_exit_config.contrast_layer_indices is not None else [multi_exit_config.output_layer_index]
             for layer in multi_exit_config_layers:
                 if layer not in {*model_config.lm_head_layer_indices, 'original'}:
-                    raise Exception(f'Exit layer {layer} in the MultiExitConfiguration does not match the exit heads '
+                    raise Exception(f'Exit layer {layer} in the MultiExitConfiguration does not match the exits '
                                     f'in the pre-trained model checkpoint ({model_config.lm_head_layer_indices})')
 
         multi_exit_kwargs = multi_exit_config.get_runtime_kwargs()
