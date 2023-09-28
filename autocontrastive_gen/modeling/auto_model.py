@@ -12,16 +12,26 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 #
-from transformers import AutoConfig, GPTNeoConfig, GPT2Config, T5Config
+from transformers import (
+    AutoConfig, 
+    GPTNeoConfig,
+    GPT2Config,
+    T5Config,
+    LlamaConfig,
+)
 
 from autocontrastive_gen.modeling.configuration import MultiExitConfiguration
 from autocontrastive_gen.modeling.gpt2_multi_head import MultiExitGPT2
 from autocontrastive_gen.modeling.gpt_neo_multi_head import MultiExitGPTNeo
 from autocontrastive_gen.modeling.t5_multi_head import MultiExitT5
+from autocontrastive_gen.modeling.llama import MultiExitLlama
 
-CONFIG_TO_MODEL_CLASS_MAPPING = {GPTNeoConfig: MultiExitGPTNeo,
-                                 GPT2Config: MultiExitGPT2,
-                                 T5Config: MultiExitT5}
+CONFIG_TO_MODEL_CLASS_MAPPING = {
+    GPTNeoConfig: MultiExitGPTNeo,
+    GPT2Config: MultiExitGPT2,
+    T5Config: MultiExitT5,
+    LlamaConfig: MultiExitLlama,
+}
 
 
 class AutoMultiExitModel:
