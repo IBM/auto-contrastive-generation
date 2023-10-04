@@ -49,9 +49,8 @@ class MultiExitModel:
 
         # We use a dedicated wrapper - instead of just overriding *forward()* - to preserve the original signature (the
         # transformers library does some validations of expected *forward()* input arguments, which differ by model)
-        def forward_method_wrapper(*args, **kwargs):
-            return self._forward(*args, **kwargs)
-        self.forward = functools.update_wrapper(wrapper=forward_method_wrapper, wrapped=self.forward)
+        self.forward = functools.update_wrapper(wrapper=functools.partial(self._forward),
+                                                wrapped=self.forward)
 
         self.vocab_projection_mode = vocab_projection_mode
         self.output_size = getattr(config, self.output_size_config_key)
