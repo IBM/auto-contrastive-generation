@@ -62,8 +62,11 @@ class AutoMultiExitModel:
                                     f'in the pre-trained model checkpoint ({model_config.lm_head_layer_indices})')
 
         multi_exit_kwargs = multi_exit_config.get_runtime_kwargs()
-        # We initialize GenerationConfig separately to avoid passing the multi_exit_kwargs to it
-        gen_config = GenerationConfig.from_pretrained(model_name_or_path, **extra_kwargs)
+        try:
+            # We initialize GenerationConfig separately to avoid passing the multi_exit_kwargs to it
+            gen_config = GenerationConfig.from_pretrained(model_name_or_path, **extra_kwargs)
+        except OSError:
+            gen_config = None
         return model_class.from_pretrained(model_name_or_path,
                                            config=model_config,
                                            generation_config=gen_config,
