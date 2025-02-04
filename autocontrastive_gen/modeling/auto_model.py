@@ -18,6 +18,7 @@ from transformers import (
     GPT2Config,
     T5Config,
     LlamaConfig,
+    GenerationConfig,
 )
 
 from autocontrastive_gen.modeling.configuration import MultiExitConfiguration
@@ -61,4 +62,10 @@ class AutoMultiExitModel:
                                     f'in the pre-trained model checkpoint ({model_config.lm_head_layer_indices})')
 
         multi_exit_kwargs = multi_exit_config.get_runtime_kwargs()
-        return model_class.from_pretrained(model_name_or_path, config=model_config, **multi_exit_kwargs, **extra_kwargs)
+        # We initialize GenerationConfig separately to avoid passing the multi_exit_kwargs to it
+        gen_config = GenerationConfig.from_pretrained(model_name_or_path, **extra_kwargs)
+        return model_class.from_pretrained(model_name_or_path,
+                                           config=model_config,
+                                           generation_config=gen_config,
+                                           **multi_exit_kwargs,
+                                           **extra_kwargs)
