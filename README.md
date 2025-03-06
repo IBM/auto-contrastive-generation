@@ -72,13 +72,13 @@ Model behavior is determined by the `MultiExitConfiguration` used to initialize 
 ## Running language modeling benchmarks
 For GPT-family models, it is possible to run benchmarks for a given multi-exit model with the [Language Model Evaluation Harness](https://github.com/EleutherAI/lm-evaluation-harness) library, for different generation settings.
 
-This is done via `python -m autocontrastive_gen.evaluation.lm_eval_harness.run_lm_eval`, by specifying `--model multi_exit_gpt` and adding the desired [multi-exit configuration settings](#setting-the-multi-exit-configuration) to the `--model_args` runtime argument.
+This is done via `python -m autocontrastive_gen.evaluation.lm_eval_harness.run_lm_eval`, by specifying `--model multi_exit_hf` and adding the desired [multi-exit configuration settings](#setting-the-multi-exit-configuration) to the `--model_args` runtime argument.
 
 _For example:_
 ```powershell
 python -m autocontrastive_gen.evaluation.lm_eval_harness.run_lm_eval \
 --tasks lambada_openai \
---model multi_exit_gpt \
+--model multi_exit_hf \
 --model_args pretrained=IBM/gpt2-medium-multiexit,use_original_head=False,contrast_layer_indices='original;12' \
 --output_path my_output_path
 ```

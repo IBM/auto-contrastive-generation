@@ -2,6 +2,6 @@ numpy==2.2.2
 transformers[torch]==4.48.2
 pandas==2.2.3
 datasets==3.2.0
-lm-eval==0.3.0
+lm-eval==0.4.7
 scikit-learn==1.6.1
 # for run_inference.py, the dependencies in 'extra_requirements.txt' must be installed as well
