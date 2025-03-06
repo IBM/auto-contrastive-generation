@@ -1,5 +1,5 @@
 #
-#  Copyright (c) 2023 IBM Corp.
+#  Copyright (c) 2025 IBM Corp.
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
 #  You may obtain a copy of the License at
@@ -143,13 +143,13 @@ if __name__ == '__main__':
         if layer == last_layer:
             continue
 
-        print(f'learning conversion matrix from {layer} to {last_layer}, based on {layer_to_vectors[layer].shape[0]} vectors')
+        print(f'learning conversion matrix from layer {layer} to layer {last_layer}, based on {layer_to_vectors[layer].shape[0]} vectors')
         mat = linreg(layer_to_vectors[layer], layer_to_vectors[last_layer], intercept=False,
                      file_name=f'{layer}_{last_layer}.pickle')
 
         # save model with the conversion matrices
         model.name_to_conv_matrix[f'{layer}_to_{last_layer}'].weight.data[:] = mat
 
-        out_path = args.model_name_or_path.replace('/', '_') + '_multi_exit' + '-'.join(str(l) for l in layers_to_infer[:i+1])
-        model.save_pretrained(out_path)
-        tokenizer.save_pretrained(out_path)
+        out_path = args.model_name_or_path.replace('/', '_') + '_multi_exit_' + '-'.join(str(l) for l in layers_to_infer[:i+1])
+    model.save_pretrained(out_path)
+    tokenizer.save_pretrained(out_path)

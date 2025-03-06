@@ -1,3 +1,17 @@
+#
+#  Copyright (c) 2025 IBM Corp.
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#  http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#
 import functools
 from abc import abstractmethod
 from typing import Optional, Union, Callable
@@ -109,7 +123,7 @@ class MultiExitModel:
                     layer_index = int(head_name.split(self.lm_head_name_prefix)[-1])
                     is_last_layer = layer_index == self.num_layers
                     layer_outputs = self.normalize_layer_output(all_hidden_states[layer_index], is_last_layer)
-                    layer_outputs = layer_lm_head.to(device)(layer_outputs) if self.apply_lm_head \
+                    layer_outputs = layer_lm_head.to(device)(layer_outputs[:, -1:, :]) if self.apply_lm_head \
                         else layer_outputs
                     index_to_layer_lm_logits[layer_index] = layer_outputs
 
@@ -120,7 +134,7 @@ class MultiExitModel:
                 layer_outputs = self.normalize_layer_output(all_hidden_states[layer_index], is_last_layer=False)
                 if self.apply_lm_head:
                     # apply conversion matrix to the layer outputs to approximate final layer outputs
-                    layer_outputs = conv_matrix.to(device)(layer_outputs)
+                    layer_outputs = conv_matrix.to(device)(layer_outputs[:, -1:, :])
                     layer_outputs = self.lm_head.to(device)(layer_outputs)
                 index_to_layer_lm_logits[layer_index] = layer_outputs
 
@@ -129,7 +143,7 @@ class MultiExitModel:
                 is_last_layer = layer_index == self.num_layers
                 layer_outputs = self.normalize_layer_output(all_hidden_states[layer_index], is_last_layer)
                 if self.apply_lm_head:
-                    layer_outputs = self.lm_head.to(device)(layer_outputs)
+                    layer_outputs = self.lm_head.to(device)(layer_outputs[:, -1:, :])
                 index_to_layer_lm_logits[layer_index] = layer_outputs
 
         return index_to_layer_lm_logits
