@@ -1,5 +1,5 @@
 numpy==2.2.2
-transformers[torch]==4.48.2
+transformers[torch]==5.10.1
 pandas==2.2.3
 datasets==3.2.0
 lm-eval==0.4.7
